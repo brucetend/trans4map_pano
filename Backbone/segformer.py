@@ -209,12 +209,12 @@ class Segformer(nn.Module):
     def __init__(self, img_size=224, patch_size=4, in_chans=3, num_classes=13, embed_dims=[64, 128, 320, 512],
                  num_heads=[1, 2, 5, 8], mlp_ratios=[4, 4, 4, 4], qkv_bias=True, qk_scale=None, drop_rate=0.,
                  attn_drop_rate=0., drop_path_rate=0.1, norm_layer=partial(nn.LayerNorm, eps=1e-6),
-                 depths=[3, 4, 6, 3], sr_ratios=[8, 4, 2, 1], decoder_dim=256):
+                 depths=[3, 4, 6, 3], sr_ratios=[8, 4, 2, 1], decoder_dim=768): #256
         super().__init__()
         self.num_classes = num_classes
         self.depths = depths
 
-        # patch_embed
+        # patch_embed ???
         self.patch_embed1 = OverlapPatchEmbed(img_size=img_size, patch_size=7, stride=4, in_chans=in_chans,
                                               embed_dim=embed_dims[0])
         self.patch_embed2 = OverlapPatchEmbed(img_size=img_size // 4, patch_size=3, stride=2, in_chans=embed_dims[0],
@@ -271,6 +271,8 @@ class Segformer(nn.Module):
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
+        # print('what is the m:',m)
+
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
             if isinstance(m, nn.Linear) and m.bias is not None:
@@ -289,6 +291,9 @@ class Segformer(nn.Module):
     #     if isinstance(pretrained, str):
     #         logger = get_root_logger()
     #         load_checkpoint(self, pretrained, map_location='cpu', strict=False, logger=logger)
+    def init_weights_pretrained(self, path):
+        hahha = 1
+
 
     def reset_drop_path(self, drop_path_rate):
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(self.depths))]

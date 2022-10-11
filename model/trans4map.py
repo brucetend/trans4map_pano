@@ -6,6 +6,9 @@ import numpy as np
 import torchvision.transforms as transforms
 from Backbone.segformer import Segformer
 
+from lib2.config import config, update_config, infer_exp_id
+from lib2 import dataset
+
 # from mmcv.cnn import ConvModule
 
 
@@ -185,8 +188,8 @@ class Trans4map(nn.Module):
 
     # def forward(self, features, proj_indices, masks_inliers):
     def forward(self, rgb, proj_indices, masks_inliers):
-        features = self.encoder(rgb) # torch.Size([1, 20, 3, 480, 640])
-        features = features.unsqueeze(0) # torch.Size([1, 20, 64, 120, 160])
+        features = self.encoder(rgb) # torch.Size([1, 4, 3, 480, 640])
+        features = features.unsqueeze(0) # torch.Size([1, 4, 64, 120, 160])
         # predictions = F.interpolate(predictions, size=(480,640), mode="bilinear", align_corners=True)
         memory, observed_masks = self.memory_update(features,
                                                     proj_indices,

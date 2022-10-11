@@ -1,21 +1,22 @@
-name_experiment: gru_fullrez_lastlayer_m256
+name_experiment: pano_top_down_mapping
 model:
     arch: smnet
     finetune: False
-    n_obj_classes: 20
+    n_obj_classes: 21
     ego_feature_dim: 64
     mem_feature_dim: 256
-    mem_update: gru
+    mem_update: replace
     ego_downsample: False
 data:
     train_split: train
     val_split: val
-    root: /cvhci/data/VisLoc/2Train
+    test_split: test
+    root: /cvhci/data/VisLoc/zteng/trans4map_baseline
     ego_downsample: False
     feature_type: lastlayer
 training:
-    train_epoch: 2
-    batch_size: 4 #8
+    train_epoch: 50
+    batch_size: 4
     n_workers: 8
     print_interval: 20
     optimizer:

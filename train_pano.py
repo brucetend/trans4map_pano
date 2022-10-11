@@ -17,12 +17,13 @@ from tensorboardX import SummaryWriter
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DistributedSampler
 
-from model.loader import DatasetLoader
-from model.trans4map import Trans4map
+from model.pano_data_loader import DatasetLoader_pano
+from model.trans4pano_map import Trans4map_segformer
 from model.loss import SemmapLoss
 from metric import averageMeter
 from metric.iou import IoU
 from model.utils import get_logger
+from torchsummary import summary
 
 
 
@@ -43,7 +44,7 @@ def train(rank, world_size, cfg):
         'nccl', store=tcp_store, rank=rank, world_size=world_size
     )
 
-    # Setup device ##############################################
+    ################################################## Setup device ####################################################
     if torch.cuda.is_available():
         device = torch.device("cuda", rank)
         torch.cuda.set_device(device)
@@ -56,9 +57,9 @@ def train(rank, world_size, cfg):
         logger = get_logger(cfg["logdir"])
         logger.info("Let Trans4Map training begin !!")
 
-    # Setup Dataloader
-    t_loader = DatasetLoader(cfg["data"], split=cfg['data']['train_split'])
-    v_loader = DatasetLoader(cfg['data'], split=cfg["data"]["val_split"])
+    # Setup Dataloader ###????重点问题
+    t_loader = DatasetLoader_pano(cfg["data"], split=cfg['data']['train_split'])
+    v_loader = DatasetLoader_pano(cfg['data'], split=cfg["data"]["val_split"])
     t_sampler = DistributedSampler(t_loader)
     v_sampler = DistributedSampler(v_loader, shuffle=False)
 
@@ -87,9 +88,8 @@ def train(rank, world_size, cfg):
         multiprocessing_context='fork',
     )
 
-
     #################################################### Setup Model ###################################################
-    model = Trans4map(cfg['model'], device)
+    model = Trans4map_segformer(cfg['model'], device)
     # # # # model.apply(model.weights_init)
     model = model.to(device)
 
@@ -98,6 +98,7 @@ def train(rank, world_size, cfg):
 
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
     params = sum([np.prod(p.size()) for p in model_parameters])
+
     if rank == 0:
         print('# trainable parameters = ', params)
 
@@ -111,6 +112,7 @@ def train(rank, world_size, cfg):
     lr_decay_lambda = lambda epoch: cfg['training']['scheduler']['lr_decay_rate'] ** (
                 epoch // cfg['training']['scheduler']['lr_epoch_per_decay'])
     scheduler = LambdaLR(optimizer, lr_lambda=lr_decay_lambda)
+
 
     # Setup Metrics
     obj_running_metrics = IoU(cfg['model']['n_obj_classes'])
@@ -131,6 +133,8 @@ def train(rank, world_size, cfg):
     start_iter = 0
     start_epoch = 0
     best_iou = -100.0
+
+
     if cfg["training"]["resume"] is not None:
         if os.path.isfile(cfg["training"]["resume"]):
             if rank == 0:
@@ -173,19 +177,26 @@ def train(rank, world_size, cfg):
     for epoch in range(start_epoch, cfg["training"]["train_epoch"], 1):
 
         t_sampler.set_epoch(epoch)
+
         for batch in trainloader:
 
             iter += 1
             start_ts = time.time()
 
 
-            rgb, depth, masks_inliers, proj_indices, semmap_gt = batch
+            rgb, rgb_no_norm, masks_inliers, proj_indices, semmap_gt = batch
 
             model.train()
 
             optimizer.zero_grad()
-            semmap_pred, observed_masks = model(rgb, proj_indices, masks_inliers)
-            print('semmap_gt, semmap_pred:', semmap_pred.size(), semmap_gt.size(), observed_masks.size(), semmap_pred.dtype, semmap_gt.dtype, observed_masks.dtype )
+
+            # print('rgb, proj_indices, masks_inliers:', rgb.shape, proj_indices.shape, masks_inliers.shape)
+            # print('rgb_no_norm:', rgb_no_norm.size())
+
+            semmap_pred, observed_masks = model(rgb, proj_indices, masks_inliers, rgb_no_norm)
+
+            semmap_gt = semmap_gt.long()
+            # print('**semmap_pred:', semmap_pred.size(), semmap_gt.size(), semmap_pred.dtype, semmap_gt.dtype, observed_masks.dtype)
 
             if observed_masks.any():
                 loss = loss_fn(semmap_gt.to(device), semmap_pred, observed_masks)
@@ -201,6 +212,8 @@ def train(rank, world_size, cfg):
 
                 obj_gt = masked_semmap_gt.detach()
                 obj_pred = masked_semmap_pred.data.max(-1)[1].detach()
+                # print('obj_gt, obj_pred:', obj_gt.size(), obj_pred.size(), torch.unique(obj_gt), torch.unique(obj_pred))
+
                 obj_running_metrics.add(obj_pred, obj_gt)
 
             time_meter.update(time.time() - start_ts)
@@ -243,17 +256,21 @@ def train(rank, world_size, cfg):
                     writer.add_scalar("loss/train_loss", loss.item(), iter)
                     time_meter.reset()
 
+        ########## validation ###########
         model.eval()
         with torch.no_grad():
             for batch_val in valloader:
 
-                rgb, depth, masks_inliers, proj_indices, semmap_gt = batch_val
+                rgb, rgb_no_norm, masks_inliers, proj_indices, semmap_gt = batch_val
                 # semantic = semantic.squeeze(0).to(device)
 
-                semmap_pred, observed_masks = model(rgb, proj_indices, masks_inliers)
+                semmap_pred, observed_masks = model(rgb, proj_indices, masks_inliers, rgb_no_norm)
+                semmap_gt = semmap_gt.long()
 
                 if observed_masks.any():
                     loss_val = loss_fn(semmap_gt.to(device), semmap_pred, observed_masks)
+
+                    #####
                     semmap_pred = semmap_pred.permute(0, 2, 3, 1)
 
                     masked_semmap_gt = semmap_gt[observed_masks]
@@ -315,8 +332,6 @@ def train(rank, world_size, cfg):
                     "scheduler_state": scheduler.state_dict(),
                     "best_iou": best_iou,
                 }
-
-                print('get_logdir:', writer.file_writer.get_logdir())
                 save_path = os.path.join(
                     writer.file_writer.get_logdir(),
                     "{}_mp3d_best_model.pkl".format(cfg["model"]["arch"]),
@@ -350,7 +365,7 @@ if __name__ == "__main__":
         "--config",
         nargs="?",
         type=str,
-        default="model/model.yml",
+        default="model/model_pano.yml",
         help="Configuration file to use",
     )
 

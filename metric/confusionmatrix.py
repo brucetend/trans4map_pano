@@ -19,6 +19,7 @@ class ConfusionMatrix(metric.Metric):
         self.conf = np.ndarray((num_classes, num_classes), dtype=np.int32)
         self.normalized = normalized
         self.num_classes = num_classes
+        # print('self_num_classes:', self.num_classes)
         self.reset()
 
     def reset(self):

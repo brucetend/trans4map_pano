@@ -143,12 +143,18 @@ class Trans4Map(nn.Module):
                 out=height_map_r,
             )
 
-            m = highest_height_indices >= 0
-            m_r = highest_height_indices_r >= 0
+            #m = highest_height_indices >= 0
+            #m_r = highest_height_indices_r >= 0
+            threshold_index_m = torch.max(highest_height_indices).item()
+            threshold_index_m_r = torch.max(highest_height_indices_r).item()
+            m = (highest_height_indices < threshold_index_m)
+            m_r = (highest_height_indices_r < threshold_index_m_r)
 
             observed_masks += m
 
             if m.any():
+                # print("debug_m:", m, m.size(), state.size())
+
                 feature = F.interpolate(feature.unsqueeze(0), size=(480, 640), mode="bilinear", align_corners=True)
                 feature = feature.squeeze(0)
                 if self.ego_downsample:
@@ -170,10 +176,10 @@ class Trans4Map(nn.Module):
                     state[1][m, :] = tmp_state[1].to(self.device_mem)
 
                 elif self.mem_update == 'gru':
+                    # print("debug_m2:")
+
                     tmp_state = state[m, :].to(self.device)
-
                     tmp_state = self.rnn(tmp_memory, tmp_state)
-
                     state[m, :] = tmp_state.to(self.device_mem)
 
                 elif self.mem_update == 'replace':
@@ -221,7 +227,6 @@ class Trans4Map(nn.Module):
     def forward(self, features, proj_wtm, mask_outliers, heights, map_height, map_width):
 
         # features = self.encoder(rgb)
-
         memory, observed_masks, height_map = self.encode(features,
                                                          proj_wtm,
                                                          mask_outliers,
@@ -236,7 +241,6 @@ class Trans4Map(nn.Module):
         height_map = height_map.reshape(map_height, map_width)
 
         return semmap_scores, observed_masks, height_map
-
 
 class Decoder(nn.Module):
     def __init__(self, feat_dim, n_obj_classes):
